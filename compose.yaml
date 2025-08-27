@@ -3,6 +3,8 @@ services:
     rpi-gpsd:
         stdin_open: true
         tty: true
+        env_file:
+            - config.env
         devices:
             - /dev/ttyAMA0
             - /dev/pps0
