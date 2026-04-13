@@ -2,9 +2,9 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 # Configuration variables with environment variable defaults
-GPS_DEVICE="${GPS_DEVICE:-/dev/ttyAMA0}"
+GPS_DEVICE="${GPS_DEVICE:-/dev/ttyACM0}"
 PPS_DEVICE="${PPS_DEVICE:-/dev/pps0}"
-GPS_SPEED="${GPS_SPEED:-38400}"
+GPS_SPEED="${GPS_SPEED:-115200}"
 GPSD_SOCKET="${GPSD_SOCKET:-/var/run/gpsd.sock}"
 DEBUG_LEVEL="${DEBUG_LEVEL:-1}"
 LOG_LEVEL="${LOG_LEVEL:-0}"
