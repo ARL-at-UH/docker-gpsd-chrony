@@ -6,7 +6,7 @@ services:
         env_file:
             - config.env
         devices:
-            - /dev/ttyAMA0
+            - /dev/ttyACM0
             - /dev/pps0
         ports:
             - 123:123
