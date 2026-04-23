@@ -1,0 +1,17 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "toradex,verdin-imx8mp";
+
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            pps {
+                compatible = "pps-gpio";
+                gpios = <&gpio1 6 0>; // Mallow X19 pin 24, Verdin GPIO_4, SODIMM 212, GPIO1_IO06, GPIO_ACTIVE_HIGH
+                status = "okay";
+            };
+        };
+    };
+};
