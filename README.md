@@ -1,4 +1,4 @@
-# rpi-docker-gpsd-chrony
+# docker-gpsd-chrony
 
 This Docker image facilitates the running of the Linux GPS daemon (gpsd) on a 
 Raspberry Pi connected to an instance of Chrony. `gpsd` is a daemon 
@@ -11,8 +11,8 @@ Together these services allow for a GPS 1PPS corrected timeserver.
 
 
 
-Repo:  [dkaulukukui/rpi-docker-gpsd-chrony](https://github.com/dkaulukukui/rpi-docker-gpsd-chrony) <br>
-Docker Hub: [dkaulukukui/rpi-docker-gpsd-chrony](https://hub.docker.com/repository/docker/dkaulukukui/rpi-docker-gpsd-chrony/general) <br>
+Repo:  [ARL-at-UH/docker-gpsd-chrony](https://github.com/ARL-at-UH/docker-gpsd-chrony) <br>
+Docker Hub: [arluhdev/docker-gpsd-chrony](https://hub.docker.com/repository/docker/arluhdev/docker-gpsd-chrony/general) <br>
 Source Tutorial:  [Revisiting Microsecond Accurate NTP for Raspberry Pi with GPS PPS in 2025 - Austin's Nerdy Things](https://austinsnerdythings.com/2025/02/14/revisiting-microsecond-accurate-ntp-for-raspberry-pi-with-gps-pps-in-2025/) <br>
 GPSD references:  [GPSD Time Service HOWTO](https://gpsd.gitlab.io/gpsd/gpsd-time-service-howto.html) <br>
 PPS tools resources: https://github.com/redlab-i/pps-tools?tab=readme-ov-file <br>
