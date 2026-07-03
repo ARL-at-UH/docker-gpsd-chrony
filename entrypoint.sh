@@ -24,7 +24,7 @@ log() {
 }
 
 # ---------------------------------------------------------------------------
-# Device existence check
+# Device check
 # ---------------------------------------------------------------------------
 
 check_device() {
@@ -39,15 +39,15 @@ start_gpsd() {
     log "Starting gpsd..."
 
     if ! check_device "$GPS_DEVICE"; then
-        log "ERROR: GPS device $GPS_DEVICE does not exist."
+        log "ERROR: GPS device $GPS_DEVICE not found"
         return 1
     fi
 
     local gpsd_cmd=(
         "$GPSD_EXECUTABLE"
-        -b              # Handle USB resets gracefully
-        -G              # Allow remote access
-        -n              # Do not wait for clients
+        -b                 # tolerate USB resets
+        -G                 # listen globablly
+        -n                 # no wait for client
         -D"$DEBUG_LEVEL"
         -F "$GPSD_SOCKET"
         -s "$GPS_SPEED"
@@ -58,7 +58,7 @@ start_gpsd() {
         log "PPS device detected: $PPS_DEVICE"
         gpsd_cmd+=("$PPS_DEVICE")
     else
-        log "No PPS device found; continuing without PPS."
+        log "WARNING: PPS device $PPS_DEVICE missing; starting without PPS"
     fi
 
     log "Executing: ${gpsd_cmd[*]}"
@@ -76,11 +76,6 @@ start_gpsd() {
 start_chronyd() {
     log "Starting chronyd..."
 
-    if [[ ! -x "/usr/sbin/chronyd" ]]; then
-        log "ERROR: chronyd not found."
-        return 1
-    fi
-
     local chronyd_cmd=(
         /usr/sbin/chronyd
         -u chrony
@@ -90,33 +85,36 @@ start_chronyd() {
 
     log "Executing: ${chronyd_cmd[*]}"
     "${chronyd_cmd[@]}" &
-
-    local pid=$!
-    echo "$pid" >/var/run/chronyd.pid
-    log "chronyd started with PID $pid"
+    echo $! >/var/run/chronyd.pid
+    log "chronyd started with PID $(cat /var/run/chronyd.pid)"
 }
 
 # ---------------------------------------------------------------------------
-# GPSD HEALTH CHECK
+# GPSD HEALTH CHECK (correct)
+# ---------------------------------------------------------------------------
+# Conditions for healthy gpsd:
+# 1. PID exists and process is alive
+# 2. Control socket exists
+# 3. gpsd responds to a WATCH command (even without GPS data yet)
 # ---------------------------------------------------------------------------
 
 is_gpsd_healthy() {
-    local pid_file="/var/run/gpsd.pid"
+    local pidfile="/var/run/gpsd.pid"
+    local sock="$GPSD_SOCKET"
 
-    # PID must exist
-    if [[ ! -f "$pid_file" ]]; then
-        return 1
-    fi
-
+    # PID file and process running?
+    [[ -f "$pidfile" ]] || return 1
     local pid
-    pid=$(cat "$pid_file")
+    pid=$(cat "$pidfile")
+    kill -0 "$pid" 2>/dev/null || return 1
 
-    if ! kill -0 "$pid" 2>/dev/null; then
-        return 1
-    fi
+    # Control socket must exist
+    [[ -S "$sock" ]] || return 1
 
-    # gpsd is healthy if it *responds* to WATCH, even if no data returned yet
-    if ! timeout 2 bash -c "echo '?' | nc -U $GPSD_SOCKET >/dev/null 2>&1"; then
+    # Try a WATCH command (gpsd must respond)
+    if ! timeout 2 sh -c \
+        "printf '?WATCH={\"enable\":false}\n' | socat - UNIX-CONNECT:$sock >/dev/null 2>&1"
+    then
         return 1
     fi
 
@@ -147,7 +145,7 @@ cleanup() {
 trap cleanup SIGTERM SIGINT SIGQUIT
 
 # ---------------------------------------------------------------------------
-# MONITORING LOOP
+# MONITOR LOOP
 # ---------------------------------------------------------------------------
 
 monitor_services() {
@@ -155,12 +153,12 @@ monitor_services() {
 
     while true; do
         if ! is_gpsd_healthy; then
-            log "ERROR: gpsd failed health check."
+            log "ERROR: gpsd health check failed!"
 
             if [[ "$RESTART_ON_FAILURE" == "true" ]]; then
                 log "Restarting gpsd..."
                 start_gpsd
-                sleep 3
+                sleep 8
             else
                 cleanup
                 exit 1
@@ -172,7 +170,7 @@ monitor_services() {
 }
 
 # ---------------------------------------------------------------------------
-# Main Flow
+# MAIN PROGRAM
 # ---------------------------------------------------------------------------
 
 log "=== Starting GPS + Chrony Container ==="
@@ -184,9 +182,8 @@ start_chronyd
 sleep 2
 
 start_gpsd
-sleep 5
+sleep 12   # IMPORTANT: USB GPS + PPS needs extra time to initialize
 
 log "Services started."
-sleep 8
 
 monitor_services
