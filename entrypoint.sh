@@ -45,6 +45,11 @@ MONITOR_INTERVAL="${MONITOR_INTERVAL:-5}"
 ENABLE_MONITORING="${ENABLE_MONITORING:-false}"
 RESTART_ON_FAILURE="${RESTART_ON_FAILURE:-false}"
 
+# PIDs of the supervised daemons (set by start_gpsd/start_chronyd).
+# Both daemons run in the foreground so these are the real daemon PIDs.
+GPSD_PID=""
+CHRONYD_PID=""
+
 ###############################################
 log() {
     echo "[`date '+%Y-%m-%d %H:%M:%S'`] $*"
@@ -60,7 +65,7 @@ check_device() {
 }
 
 ###############################################
-# Start gpsd (corrected logic)
+# Start gpsd
 ###############################################
 start_gpsd() {
     log "Starting GPSD service..."
@@ -70,12 +75,17 @@ start_gpsd() {
         return 1
     }
 
+    # Remove a stale control socket left by a previous instance,
+    # otherwise gpsd fails to bind it on restart
+    rm -f "$GPSD_SOCKET"
+
     local gpsd_cmd=("$GPSD_EXECUTABLE")
 
     [[ "$GPSD_LISTEN_ALL" == "true" ]] && gpsd_cmd+=("-G")
     [[ "$GPSD_NO_WAIT" == "true" ]] && gpsd_cmd+=("-n")
 
     gpsd_cmd+=(
+        "-N"                    # foreground: keeps gpsd a direct child so $! is the real PID
         "-b"                    # tolerate USB resets
         "-D$DEBUG_LEVEL"
         "-F" "$GPSD_SOCKET"
@@ -93,9 +103,9 @@ start_gpsd() {
     log "Executing: ${gpsd_cmd[*]}"
     "${gpsd_cmd[@]}" &
 
-    local pid=$!
-    echo "$pid" > "$GPSD_PID_FILE"
-    log "GPSD started with PID: $pid"
+    GPSD_PID=$!
+    echo "$GPSD_PID" > "$GPSD_PID_FILE"
+    log "GPSD started with PID: $GPSD_PID"
 }
 
 ###############################################
@@ -141,9 +151,9 @@ start_chronyd() {
     log "Executing: ${chronyd_cmd[*]}"
     "${chronyd_cmd[@]}" &
 
-    local pid=$!
-    echo "$pid" > "$CHRONYD_PID_FILE"
-    log "Chronyd started with PID: $pid"
+    CHRONYD_PID=$!
+    echo "$CHRONYD_PID" > "$CHRONYD_PID_FILE"
+    log "Chronyd started with PID: $CHRONYD_PID"
 }
 
 ###############################################
@@ -152,15 +162,15 @@ start_chronyd() {
 cleanup() {
     log "Received shutdown signal, cleaning up..."
 
-    if [[ -f "$CHRONYD_PID_FILE" ]]; then
-        kill "$(cat "$CHRONYD_PID_FILE")" 2>/dev/null || true
-        rm -f "$CHRONYD_PID_FILE"
+    if [[ -n "$CHRONYD_PID" ]]; then
+        kill "$CHRONYD_PID" 2>/dev/null || true
     fi
 
-    if [[ -f "$GPSD_PID_FILE" ]]; then
-        kill "$(cat "$GPSD_PID_FILE")" 2>/dev/null || true
-        rm -f "$GPSD_PID_FILE"
+    if [[ -n "$GPSD_PID" ]]; then
+        kill "$GPSD_PID" 2>/dev/null || true
     fi
+
+    rm -f "$CHRONYD_PID_FILE" "$GPSD_PID_FILE"
 
     log "Cleanup completed"
     exit 0
@@ -169,30 +179,35 @@ cleanup() {
 trap cleanup SIGTERM SIGINT SIGQUIT
 
 ###############################################
-# Monitor services (unchanged but simple PID check only)
+# Monitor services
 ###############################################
 monitor_services() {
     log "Monitoring services..."
 
     while true; do
 
-        if [[ -f "$GPSD_PID_FILE" ]]; then
-            local pid=$(cat "$GPSD_PID_FILE")
-            if ! kill -0 "$pid" 2>/dev/null; then
-                log "ERROR: gpsd died"
-                [[ "$RESTART_ON_FAILURE" == "true" ]] && start_gpsd
+        if [[ -n "$GPSD_PID" ]] && ! kill -0 "$GPSD_PID" 2>/dev/null; then
+            log "ERROR: gpsd died"
+            if [[ "$RESTART_ON_FAILURE" == "true" ]]; then
+                if ! start_gpsd; then
+                    log "WARNING: gpsd restart failed; retrying in ${MONITOR_INTERVAL}s"
+                fi
             fi
         fi
 
-        if [[ -f "$CHRONYD_PID_FILE" ]]; then
-            local pid=$(cat "$CHRONYD_PID_FILE")
-            if ! kill -0 "$pid" 2>/dev/null; then
-                log "ERROR: chronyd died"
-                [[ "$RESTART_ON_FAILURE" == "true" ]] && start_chronyd
+        if [[ -n "$CHRONYD_PID" ]] && ! kill -0 "$CHRONYD_PID" 2>/dev/null; then
+            log "ERROR: chronyd died"
+            if [[ "$RESTART_ON_FAILURE" == "true" ]]; then
+                if ! start_chronyd; then
+                    log "WARNING: chronyd restart failed; retrying in ${MONITOR_INTERVAL}s"
+                fi
             fi
         fi
 
-        sleep "$MONITOR_INTERVAL"
+        # Background the sleep so trapped signals (docker stop) are
+        # handled immediately instead of after the interval expires
+        sleep "$MONITOR_INTERVAL" &
+        wait $! || true
     done
 }
 
