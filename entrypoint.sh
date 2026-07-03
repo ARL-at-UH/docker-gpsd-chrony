@@ -115,8 +115,8 @@ is_gpsd_healthy() {
         return 1
     fi
 
-    # Confirm gpsd responds on control socket
-    if ! timeout 2 gpspipe -w -n 1 >/dev/null 2>&1; then
+    # gpsd is healthy if it *responds* to WATCH, even if no data returned yet
+    if ! timeout 2 bash -c "echo '?' | nc -U $GPSD_SOCKET >/dev/null 2>&1"; then
         return 1
     fi
 
@@ -187,5 +187,6 @@ start_gpsd
 sleep 5
 
 log "Services started."
+sleep 8
 
 monitor_services

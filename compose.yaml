@@ -14,7 +14,7 @@ services:
         cap_add:
             - SYS_TIME
         privileged: true
-        image: arluhdev/docker-gpsd-chrony
+        image: arluhdev/docker-gpsd-chrony:xavier-nx
         volumes:
             - chrony_logs:/var/log/chrony
             - chrony_drift:/var/lib/chrony
