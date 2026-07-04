@@ -27,7 +27,8 @@ sudo docker exec -it gpsd-chrony bash
 
 ## Layer 0 — Host prerequisites (run on the host, not the container)
 
-1. **Device nodes exist** and match `config.env` (`GPS_DEVICE`, `PPS_DEVICE`):
+1. **Device nodes exist** and match the *host side* (left) of the
+   `devices:` mappings in `compose.yaml`:
 
    ```bash
    ls -l /dev/ttyACM0 /dev/pps0        # adjust to your platform
@@ -36,6 +37,14 @@ sudo docker exec -it gpsd-chrony bash
    If `/dev/pps0` is missing: check that the `pps-gpio` overlay/module is
    loaded (`lsmod | grep pps`, `dmesg | grep pps`) and the device tree
    overlay is applied (see `device_tree_overlays/`).
+
+   If using the stable-naming udev rule from `udev_rules/`, verify the
+   symlink resolves to the correct serial device:
+
+   ```bash
+   ls -l /dev/gps0
+   # lrwxrwxrwx 1 root root 7 ... /dev/gps0 -> ttyACM0
+   ```
 
 2. **No competing time daemon on the host.** `systemd-timesyncd`, host
    `chronyd`, or `ntpd` will fight the container for the clock:
@@ -101,8 +110,31 @@ sudo docker exec -it gpsd-chrony bash
    Multiple `gpsd` entries mean the restart logic is respawning against a
    stale PID (see the monitoring notes at the end of this guide).
 
+4. **The container-side device nodes exist** (the fixed names on the right
+   of the `devices:` mappings in `compose.yaml`):
+
+   ```bash
+   sudo docker exec gpsd-chrony ls -l /dev/gps0 /dev/pps0
+   ```
+
+   Both must be real character devices (`crw-...`), not symlinks. If
+   `/dev/gps0` is missing but `/dev/ttyACM0` exists inside the container,
+   `privileged: true` has probably been re-added — privileged mode makes
+   Docker ignore `devices:` mappings (see `udev_rules/README.md`).
+
+5. **No capability errors from chronyd.** The container runs unprivileged
+   with `cap_add: SYS_TIME, SYS_NICE, IPC_LOCK`. Any of these lines in the
+   startup log means a capability is missing from `compose.yaml`:
+
+   | Log message contains | Missing capability | Needed by |
+   |---|---|---|
+   | `adjtimex`/`settime` ... `Operation not permitted` | `SYS_TIME` | setting the system clock |
+   | `sched_setscheduler` ... `Operation not permitted` | `SYS_NICE` | `sched_priority` in chrony.conf |
+   | `mlockall` ... `Operation not permitted` | `IPC_LOCK` | `lock_all` in chrony.conf |
+
 **Pass criteria:** container `Up`, one gpsd process, one chronyd process,
-no repeating ERROR lines in the log.
+`/dev/gps0` and `/dev/pps0` present as char devices in the container,
+no repeating ERROR lines and no `Operation not permitted` in the log.
 
 ---
 
@@ -339,6 +371,32 @@ LAN-level offsets.
    and `chrony_statistics_analyzer.py` for offset calibration once the
    basic verification passes.
 
+5. **Boot persistence.** Confirm the restart policy is active, then prove
+   it survives a reboot:
+
+   ```bash
+   sudo docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' gpsd-chrony
+   # unless-stopped
+   sudo reboot
+   # after the host is back:
+   sudo docker ps --format 'table {{.Names}}\t{{.Status}}'   # Up, no manual start
+   ```
+
+   Then re-check Layer 5 — `#*` on PPS should return within the normal
+   warm-up period.
+
+6. **Replug self-healing.** Unplug the USB receiver, wait for the
+   container log to show gpsd restart attempts, and confirm that after
+   `MAX_RESTART_ATTEMPTS` failures the container exits with a `FATAL`
+   log line and Docker starts it again automatically. Replug the
+   receiver (before or after the exit) and confirm the fresh container
+   finds it — even if the kernel name shifted (e.g. `ttyACM0` →
+   `ttyACM1`) — because the restarted container re-resolves the
+   `/dev/gps0` udev symlink. If the new container still can't see the
+   device, fall back to `sudo docker compose up -d --force-recreate` and
+   report it — that would mean device paths are not being re-resolved on
+   restart on your Docker version.
+
 ---
 
 ## Troubleshooting quick reference
@@ -346,8 +404,9 @@ LAN-level offsets.
 | Symptom | First check | Likely cause |
 |---|---|---|
 | Container restart loop | `docker logs` | Missing device node; chronyd config error |
-| Log spams `ERROR: gpsd died` but gpsd is running | `ps` inside container | Monitor tracking a stale PID (gpsd daemonized; parent PID recorded) — see note below |
-| Multiple gpsd processes in `ps` | startup log restart lines | Same stale-PID bug: monitor respawning gpsd every interval |
+| GPS dead after unplug/replug, container still up | host `ls -l /dev/gps0` vs container | Container node pinned to the old device — `docker compose up -d --force-recreate` |
+| Log spams `ERROR: gpsd died` but gpsd is running, or multiple gpsd processes in `ps` | the `Executing: gpsd ...` log line | Monitor tracking the wrong PID — gpsd must run foreground (`-N` must be on its command line; see note below) |
+| Container exits with `FATAL ... restart attempts` and loops | the layer where it first fails (usually device) | Deliberate fail-fast handing recovery to Docker's restart policy — see the monitor note below |
 | `ppstest` silent, gpsd has 3D fix | wiring / dtoverlay | PPS pin not reaching the kernel |
 | gpsd `mode:1` forever | antenna sky view, `cgps` SNR column | No fix — antenna placement or receiver power |
 | `sourcestats` GPS row NP=0 | `ipcs -m` | SHM handoff broken (gpsd started without data / chronyd restarted wrongly) |
@@ -355,16 +414,18 @@ LAN-level offsets.
 | Locked to GPS (`#* GPS`), PPS rejected | `refclock PPS ... lock GPS` names must match `refid` of the SHM source | Millisecond-only accuracy |
 | Client gets stratum 1 but time is wrong | `chronyc tracking` Leap status | `local stratum 1` masking a lost lock |
 
-### Note on the entrypoint monitor (known defect)
+### How the entrypoint monitor behaves
 
-The `monitor_services` loop in `entrypoint.sh` checks the PID captured from
-`gpsd ... &`. Because gpsd **daemonizes by default** (it is not started
-with `-N`), that PID belongs to a parent process that exits immediately —
-so the check fails on every cycle, and with `RESTART_ON_FAILURE=true` the
-monitor spawns a new gpsd every `MONITOR_INTERVAL` seconds. Until the
-entrypoint is fixed (run gpsd with `-N`, or supervise with `wait -n`
-instead of PID files), treat monitor output as unreliable and verify
-process health with Layer 1 step 3 instead.
+`monitor_services` in `entrypoint.sh` supervises both daemons as direct
+foreground children (gpsd runs with `-N`), checking them every
+`MONITOR_INTERVAL` seconds. On failure it restarts the dead daemon
+in-container up to `MAX_RESTART_ATTEMPTS` consecutive times; beyond that
+it logs `FATAL` and **exits the container on purpose**, so Docker's
+`restart: unless-stopped` policy recreates it with freshly resolved
+device mappings (this is the recovery path for USB re-enumeration). A
+container that keeps exiting and restarting is therefore reporting a
+persistent device or configuration problem — read the `FATAL` line and
+work back up the layers.
 
 ---
 

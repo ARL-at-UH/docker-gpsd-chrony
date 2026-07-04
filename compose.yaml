@@ -1,19 +1,30 @@
-name: rpi_gpsd_chrony
+name: gpsd_chrony
 services:
-    rpi-gpsd:
+    gpsd-chrony:
         stdin_open: true
         tty: true
+        restart: unless-stopped
         env_file:
             - config.env
         devices:
-            - /dev/ttyACM0
-            - /dev/pps0
+            # host side (left) is platform-specific — swap /dev/ttyACM0 for the
+            # /dev/gps0 udev symlink once udev_rules/ is installed, and use the
+            # platform's PPS name (e.g. /dev/pps1 on Apalis).
+            # container side (right) is fixed; config.env and chrony.conf never change.
+            - /dev/ttyACM0:/dev/gps0
+            - /dev/pps0:/dev/pps0
         ports:
-            - 123:123
+            # NTP to external hosts — must be /udp (a bare 123:123 would
+            # publish TCP only, and NTP clients would never connect)
+            - "123:123/udp"
         container_name: gpsd-chrony
+        # NOTE: do not use privileged: true — it makes Docker ignore the
+        # devices: mappings above (all host devices appear under raw kernel
+        # names and the custom container paths never exist).
         cap_add:
-            - SYS_TIME
-        privileged: true
+            - SYS_TIME      # chronyd: set the system clock
+            - SYS_NICE      # chrony.conf sched_priority (SCHED_FIFO)
+            - IPC_LOCK      # chrony.conf lock_all (mlockall)
         image: arluhdev/docker-gpsd-chrony:latest
         volumes:
             - chrony_logs:/var/log/chrony

@@ -18,15 +18,18 @@ microsecond-level accuracy on any Linux SBC that can expose:
 
 Tested platforms:
 
-| Platform | GPS device | PPS device | Notes |
+| Platform | Host GPS device | Host PPS device | Notes |
 |---|---|---|---|
 | Raspberry Pi 4 (Debian 12) | `/dev/ttyAMA0` | `/dev/pps0` | UART + `pps-gpio` overlay |
 | Toradex Verdin iMX8M Plus (Mallow carrier, Torizon OS) | `/dev/ttyACM0` | `/dev/pps0` | USB GNSS + GPIO PPS overlay (see [device_tree_overlays](./device_tree_overlays/)) |
 | Toradex Apalis (Ixora carrier) | `/dev/apalis-uart2` | `/dev/pps1` | UART + GPIO PPS |
 | NVIDIA Jetson Xavier NX | `/dev/ttyACM0` | `/dev/pps0` | prebuilt image tag `xavier-nx` |
 
-Example `config.env` settings for each platform are included (commented out)
-in [config.env](./config.env).
+Host device names go on the **left side** of the `devices:` mappings in
+[compose.yaml](./compose.yaml); inside the container they always appear as
+`/dev/gps0` and `/dev/pps0`, so [config.env](./config.env) and
+[chrony.conf](./chrony_config/chrony.conf) are platform-independent. Example
+mappings for each platform are in the comments of both files.
 
 ## Resources
 
@@ -93,9 +96,12 @@ The flow is the same on every platform; only step 1 is platform-specific:
 3. **Wire the GPS module**: receiver TX → SBC RX, receiver RX → SBC TX,
    PPS → the GPIO you configured, plus power and ground. Check your
    module's voltage requirements first.
-4. **Configure the container**: set `GPS_DEVICE`, `PPS_DEVICE`, and
-   `GPS_SPEED` in [config.env](./config.env), and list the same device
-   nodes under `devices:` in [compose.yaml](./compose.yaml).
+4. **Configure the container**: put your platform's host device names on
+   the left side of the `devices:` mappings in
+   [compose.yaml](./compose.yaml) (the container side stays `/dev/gps0` /
+   `/dev/pps0`), and set `GPS_SPEED` in [config.env](./config.env).
+   Optionally install the [udev rule](./udev_rules/) for a
+   re-enumeration-proof host name.
 5. **Build or pull the image** and bring it up.
 
 ## Platform setup
@@ -149,7 +155,8 @@ Tested on RPi 4 Model B (8 GB), Debian 12 (Bookworm), kernel 6.6 (64-bit).
 
    ![RASPI PINOUT](https://www.raspberrypi.com/documentation/computers/images/GPIO-Pinout-Diagram-2.png?hash=df7d7847c57a1ca6d5b2617695de6d46)
 
-Typical `config.env`: `GPS_DEVICE=/dev/ttyAMA0`, `PPS_DEVICE=/dev/pps0`.
+Typical compose mapping: `- /dev/ttyAMA0:/dev/gps0` and
+`- /dev/pps0:/dev/pps0`.
 
 ### Toradex Apalis / Verdin
 
@@ -173,8 +180,8 @@ GPIO via a `pps-gpio` device tree overlay.
   [device tree overlays overview](https://developer.toradex.com/software/linux-resources/device-tree/device-tree-overlays-overview/)),
   and connect the receiver to an Apalis UART.
 
-Typical `config.env` (Apalis): `GPS_DEVICE=/dev/apalis-uart2`,
-`PPS_DEVICE=/dev/pps1`. On Torizon OS, note that overlays live inside the
+Typical compose mapping (Apalis): `- /dev/apalis-uart2:/dev/gps0` and
+`- /dev/pps1:/dev/pps0`. On Torizon OS, note that overlays live inside the
 active OSTree deployment and should be baked in with TorizonCore Builder
 for production (see the instructions above).
 
@@ -202,7 +209,9 @@ Tested on Jetson Xavier NX (a prebuilt image is published with the
 3. Verify after reboot: `ls /dev/pps*` and `dmesg | grep -i pps` should
    show the `pps-gpio` device.
 
-Typical `config.env`: `GPS_DEVICE=/dev/ttyACM0`, `PPS_DEVICE=/dev/pps0`.
+Typical compose mapping: `- /dev/ttyACM0:/dev/gps0` and
+`- /dev/pps0:/dev/pps0` (or `- /dev/gps0:/dev/gps0` with the udev rule
+from [udev_rules](./udev_rules/) installed).
 
 ## Container configuration
 
@@ -210,16 +219,51 @@ All runtime settings live in [config.env](./config.env) — key variables:
 
 | Variable | Purpose |
 |---|---|
-| `GPS_DEVICE` | GNSS receiver device node passed to gpsd |
-| `PPS_DEVICE` | kernel PPS device node |
+| `GPS_DEVICE` | GNSS receiver device node passed to gpsd (container-side, normally `/dev/gps0`) |
+| `PPS_DEVICE` | kernel PPS device node (container-side, normally `/dev/pps0`) |
 | `GPS_SPEED` | serial baud rate (ignored for USB CDC-ACM receivers) |
 | `ENABLE_MONITORING` / `RESTART_ON_FAILURE` | supervise gpsd/chronyd and restart them if they die |
 
-The same device nodes must be passed through to the container in
-[compose.yaml](./compose.yaml) under `devices:`. Chrony's refclock setup is
-in [chrony_config/chrony.conf](./chrony_config/chrony.conf) — if your PPS
-node is not `/dev/pps0`, update the `refclock PPS` line there to match
-`PPS_DEVICE`.
+Devices are passed through in [compose.yaml](./compose.yaml) with explicit
+two-sided mappings — the platform's host device name on the left, a fixed
+container name on the right:
+
+```yaml
+devices:
+    - /dev/ttyACM0:/dev/gps0
+    - /dev/pps0:/dev/pps0
+```
+
+Only the left side ever changes per platform. `config.env` and the
+`refclock PPS /dev/pps0` line in
+[chrony_config/chrony.conf](./chrony_config/chrony.conf) always refer to
+the fixed container-side names.
+
+### Stable USB device naming (udev)
+
+USB serial receivers can re-enumerate (`/dev/ttyACM0` → `/dev/ttyACM1`)
+across reboots and replugs, silently breaking the device mapping. The
+[udev_rules](./udev_rules/) directory ships a udev rule that pins the
+receiver to a persistent host name (`/dev/gps0`) by USB vendor/product ID,
+plus install and verification instructions. Once installed, use the
+symlink on the host side of the mapping:
+
+```yaml
+devices:
+    - /dev/gps0:/dev/gps0
+```
+
+Two rules of engagement, explained in detail in
+[udev_rules/README.md](./udev_rules/README.md):
+
+- Docker resolves the host symlink **once, at container create** — after
+  replugging the receiver, run
+  `sudo docker compose up -d --force-recreate` to re-resolve it.
+- **Do not add `privileged: true`** to the compose file: privileged mode
+  makes Docker ignore `devices:` mappings entirely (all host devices
+  appear under their raw kernel names), which breaks the fixed
+  container-side naming. The compose file grants the specific capabilities
+  chrony needs (`SYS_TIME`, `SYS_NICE`, `IPC_LOCK`) instead.
 
 ### Changing configuration or the startup script — no rebuild needed
 
@@ -240,6 +284,35 @@ Rebuilding the image (`docker build`) is only needed when the
 [Dockerfile](./Dockerfile) itself changes (e.g. installed packages). The
 image still carries a baked-in copy of `entrypoint.sh` as a fallback, so it
 remains usable standalone without the repo checkout.
+
+### Serving NTP to external hosts
+
+The compose file publishes NTP on the host's UDP port 123
+(`"123:123/udp"` under `ports:` — the `/udp` suffix is required; a bare
+`123:123` publishes TCP only and NTP clients will never connect).
+Client access is controlled in
+[chrony_config/chrony.conf](./chrony_config/chrony.conf): `allow all`
+serves any client — tighten it to your network with e.g.
+`allow 192.168.1.0/24`. If the host runs a firewall, open the port
+(e.g. `sudo ufw allow 123/udp`). Remote `chronyc` monitoring is
+intentionally disabled (`cmdport 0`); only time service is exposed. See
+[VERIFICATION.md](./VERIFICATION.md) Layer 6 for client-side checks.
+
+> **Possible future change — `network_mode: host`.** Bridge networking
+> routes every NTP packet through veth/NAT (or the UDP userland proxy),
+> which adds asymmetric latency (tens to hundreds of µs of client offset
+> error on an SBC), hides real client IPs from `chronyc clients` (breaking
+> per-client rate limiting and subnet-scoped `allow` rules), and creates a
+> conntrack entry per client. Switching to `network_mode: host` fixes all
+> three and enables proper socket timestamping — the better end state for
+> a dedicated LAN time server — but it is **not** a bare one-liner: the
+> `ports:` mapping must be removed (it would be ignored), firewalling
+> becomes entirely the host's job, nothing else on the host may hold UDP
+> 123, and critically **gpsd's TCP 2947 becomes reachable on all host
+> interfaces** because gpsd runs with `-G` — so the switch must ship with
+> `GPSD_LISTEN_ALL=false` (or a firewall rule for 2947) and a scoped
+> `allow` in chrony.conf. Until then, bridge mode is kept for its
+> isolation and out-of-the-box safety.
 
 ## Build and run
 
@@ -268,6 +341,40 @@ Or in the background (recommended):
 ```bash
 sudo docker compose up --detach
 ```
+
+## Run as a service (start at boot)
+
+The compose file sets `restart: unless-stopped`, so the container is a
+boot-persistent service by default — bring it up once with
+`sudo docker compose up -d` and Docker restores it on every boot, until
+you deliberately `docker compose stop`/`down` it.
+
+The only host requirement is that the Docker daemon itself starts at boot:
+
+- **Raspberry Pi OS / Jetson Linux:** `sudo systemctl enable docker`
+  (usually already enabled by the standard install)
+- **Torizon OS:** Docker is the native application runtime and is enabled
+  by default — nothing to do
+
+No systemd wrapper unit is needed. One would only add value if the
+container had to be ordered against other host services; for the standard
+deployment the restart policy is simpler and works identically on all
+supported platforms.
+
+### How the pieces self-heal
+
+- **Boot:** daemon starts → container starts → the `devices:` mappings
+  (including the `/dev/gps0` udev symlink) are re-resolved fresh.
+- **Slow USB enumeration at boot:** the entrypoint waits up to
+  `DEVICE_WAIT_TIMEOUT` (default 60 s) for the GPS device instead of
+  exiting immediately. This also satisfies Docker's *10-second rule*: a
+  container that exits within 10 seconds of starting is never restarted
+  by any restart policy, so the entrypoint guarantees a minimum uptime
+  before any failure exit.
+- **USB replug / re-enumeration while running:** gpsd loses the device,
+  the in-container monitor exhausts `MAX_RESTART_ATTEMPTS` (default 5)
+  and exits the container; the restart policy starts it again with
+  freshly resolved device mappings — no manual intervention.
 
 ## Verification
 
@@ -303,4 +410,11 @@ Once verification passes, perform offset calibration and fine tuning:
 
 ## To do
 
-- dial back the docker `privileged` flag and make sure everything still works
+- ~~dial back the docker `privileged` flag and make sure everything still works~~
+  — done: replaced with `cap_add: SYS_TIME, SYS_NICE, IPC_LOCK` (pending
+  on-hardware validation, see [VERIFICATION.md](./VERIFICATION.md))
+- evaluate switching to `network_mode: host` for better served-time
+  accuracy and real client IPs — see the note under
+  [Serving NTP to external hosts](#serving-ntp-to-external-hosts) for the
+  required mitigations (`GPSD_LISTEN_ALL=false`, scoped `allow`, host
+  firewall)

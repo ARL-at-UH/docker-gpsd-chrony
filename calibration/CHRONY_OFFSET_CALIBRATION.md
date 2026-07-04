@@ -14,7 +14,7 @@
 Run the below to grab the last 100 lines of the statistics log file
 
 ```bash
-sudo tail -n 100 /var/lib/docker/volumes/rpi_gpsd_chrony_chrony_logs/_data/statistics.log > ./calibration/chrony_statistics.log
+sudo tail -n 100 /var/lib/docker/volumes/gpsd_chrony_chrony_logs/_data/statistics.log > ./calibration/chrony_statistics.log
 
 ```
 
