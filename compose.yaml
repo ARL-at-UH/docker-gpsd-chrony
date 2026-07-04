@@ -14,7 +14,9 @@ services:
             - /dev/ttyACM0:/dev/gps0
             - /dev/pps0:/dev/pps0
         ports:
-            - 123:123
+            # NTP to external hosts — must be /udp (a bare 123:123 would
+            # publish TCP only, and NTP clients would never connect)
+            - "123:123/udp"
         container_name: gpsd-chrony
         # NOTE: do not use privileged: true — it makes Docker ignore the
         # devices: mappings above (all host devices appear under raw kernel

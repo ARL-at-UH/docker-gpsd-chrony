@@ -285,6 +285,35 @@ Rebuilding the image (`docker build`) is only needed when the
 image still carries a baked-in copy of `entrypoint.sh` as a fallback, so it
 remains usable standalone without the repo checkout.
 
+### Serving NTP to external hosts
+
+The compose file publishes NTP on the host's UDP port 123
+(`"123:123/udp"` under `ports:` — the `/udp` suffix is required; a bare
+`123:123` publishes TCP only and NTP clients will never connect).
+Client access is controlled in
+[chrony_config/chrony.conf](./chrony_config/chrony.conf): `allow all`
+serves any client — tighten it to your network with e.g.
+`allow 192.168.1.0/24`. If the host runs a firewall, open the port
+(e.g. `sudo ufw allow 123/udp`). Remote `chronyc` monitoring is
+intentionally disabled (`cmdport 0`); only time service is exposed. See
+[VERIFICATION.md](./VERIFICATION.md) Layer 6 for client-side checks.
+
+> **Possible future change — `network_mode: host`.** Bridge networking
+> routes every NTP packet through veth/NAT (or the UDP userland proxy),
+> which adds asymmetric latency (tens to hundreds of µs of client offset
+> error on an SBC), hides real client IPs from `chronyc clients` (breaking
+> per-client rate limiting and subnet-scoped `allow` rules), and creates a
+> conntrack entry per client. Switching to `network_mode: host` fixes all
+> three and enables proper socket timestamping — the better end state for
+> a dedicated LAN time server — but it is **not** a bare one-liner: the
+> `ports:` mapping must be removed (it would be ignored), firewalling
+> becomes entirely the host's job, nothing else on the host may hold UDP
+> 123, and critically **gpsd's TCP 2947 becomes reachable on all host
+> interfaces** because gpsd runs with `-G` — so the switch must ship with
+> `GPSD_LISTEN_ALL=false` (or a firewall rule for 2947) and a scoped
+> `allow` in chrony.conf. Until then, bridge mode is kept for its
+> isolation and out-of-the-box safety.
+
 ## Build and run
 
 Clone and build:
@@ -384,3 +413,8 @@ Once verification passes, perform offset calibration and fine tuning:
 - ~~dial back the docker `privileged` flag and make sure everything still works~~
   — done: replaced with `cap_add: SYS_TIME, SYS_NICE, IPC_LOCK` (pending
   on-hardware validation, see [VERIFICATION.md](./VERIFICATION.md))
+- evaluate switching to `network_mode: host` for better served-time
+  accuracy and real client IPs — see the note under
+  [Serving NTP to external hosts](#serving-ntp-to-external-hosts) for the
+  required mitigations (`GPSD_LISTEN_ALL=false`, scoped `allow`, host
+  firewall)
