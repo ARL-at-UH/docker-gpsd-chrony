@@ -221,6 +221,26 @@ in [chrony_config/chrony.conf](./chrony_config/chrony.conf) — if your PPS
 node is not `/dev/pps0`, update the `refclock PPS` line there to match
 `PPS_DEVICE`.
 
+### Changing configuration or the startup script — no rebuild needed
+
+`entrypoint.sh`, `chrony_config/`, and `config.env` are all mounted or read
+from the repo checkout when the container starts (see `volumes:` and
+`env_file:` in [compose.yaml](./compose.yaml)). After editing any of them,
+just recreate the container:
+
+```bash
+sudo docker compose up -d --force-recreate
+```
+
+Use `--force-recreate` rather than `docker compose restart`: single-file
+bind mounts pin the file at container-create time, so an editor that
+replaces the file can leave a plain restart running the old content.
+
+Rebuilding the image (`docker build`) is only needed when the
+[Dockerfile](./Dockerfile) itself changes (e.g. installed packages). The
+image still carries a baked-in copy of `entrypoint.sh` as a fallback, so it
+remains usable standalone without the repo checkout.
+
 ## Build and run
 
 Clone and build:
