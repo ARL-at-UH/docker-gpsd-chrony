@@ -371,6 +371,32 @@ LAN-level offsets.
    and `chrony_statistics_analyzer.py` for offset calibration once the
    basic verification passes.
 
+5. **Boot persistence.** Confirm the restart policy is active, then prove
+   it survives a reboot:
+
+   ```bash
+   sudo docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' gpsd-chrony
+   # unless-stopped
+   sudo reboot
+   # after the host is back:
+   sudo docker ps --format 'table {{.Names}}\t{{.Status}}'   # Up, no manual start
+   ```
+
+   Then re-check Layer 5 — `#*` on PPS should return within the normal
+   warm-up period.
+
+6. **Replug self-healing.** Unplug the USB receiver, wait for the
+   container log to show gpsd restart attempts, and confirm that after
+   `MAX_RESTART_ATTEMPTS` failures the container exits with a `FATAL`
+   log line and Docker starts it again automatically. Replug the
+   receiver (before or after the exit) and confirm the fresh container
+   finds it — even if the kernel name shifted (e.g. `ttyACM0` →
+   `ttyACM1`) — because the restarted container re-resolves the
+   `/dev/gps0` udev symlink. If the new container still can't see the
+   device, fall back to `sudo docker compose up -d --force-recreate` and
+   report it — that would mean device paths are not being re-resolved on
+   restart on your Docker version.
+
 ---
 
 ## Troubleshooting quick reference
@@ -379,8 +405,8 @@ LAN-level offsets.
 |---|---|---|
 | Container restart loop | `docker logs` | Missing device node; chronyd config error |
 | GPS dead after unplug/replug, container still up | host `ls -l /dev/gps0` vs container | Container node pinned to the old device — `docker compose up -d --force-recreate` |
-| Log spams `ERROR: gpsd died` but gpsd is running | `ps` inside container | Monitor tracking a stale PID (gpsd daemonized; parent PID recorded) — see note below |
-| Multiple gpsd processes in `ps` | startup log restart lines | Same stale-PID bug: monitor respawning gpsd every interval |
+| Log spams `ERROR: gpsd died` but gpsd is running, or multiple gpsd processes in `ps` | the `Executing: gpsd ...` log line | Monitor tracking the wrong PID — gpsd must run foreground (`-N` must be on its command line; see note below) |
+| Container exits with `FATAL ... restart attempts` and loops | the layer where it first fails (usually device) | Deliberate fail-fast handing recovery to Docker's restart policy — see the monitor note below |
 | `ppstest` silent, gpsd has 3D fix | wiring / dtoverlay | PPS pin not reaching the kernel |
 | gpsd `mode:1` forever | antenna sky view, `cgps` SNR column | No fix — antenna placement or receiver power |
 | `sourcestats` GPS row NP=0 | `ipcs -m` | SHM handoff broken (gpsd started without data / chronyd restarted wrongly) |
@@ -388,16 +414,18 @@ LAN-level offsets.
 | Locked to GPS (`#* GPS`), PPS rejected | `refclock PPS ... lock GPS` names must match `refid` of the SHM source | Millisecond-only accuracy |
 | Client gets stratum 1 but time is wrong | `chronyc tracking` Leap status | `local stratum 1` masking a lost lock |
 
-### Note on the entrypoint monitor (known defect)
+### How the entrypoint monitor behaves
 
-The `monitor_services` loop in `entrypoint.sh` checks the PID captured from
-`gpsd ... &`. Because gpsd **daemonizes by default** (it is not started
-with `-N`), that PID belongs to a parent process that exits immediately —
-so the check fails on every cycle, and with `RESTART_ON_FAILURE=true` the
-monitor spawns a new gpsd every `MONITOR_INTERVAL` seconds. Until the
-entrypoint is fixed (run gpsd with `-N`, or supervise with `wait -n`
-instead of PID files), treat monitor output as unreliable and verify
-process health with Layer 1 step 3 instead.
+`monitor_services` in `entrypoint.sh` supervises both daemons as direct
+foreground children (gpsd runs with `-N`), checking them every
+`MONITOR_INTERVAL` seconds. On failure it restarts the dead daemon
+in-container up to `MAX_RESTART_ATTEMPTS` consecutive times; beyond that
+it logs `FATAL` and **exits the container on purpose**, so Docker's
+`restart: unless-stopped` policy recreates it with freshly resolved
+device mappings (this is the recovery path for USB re-enumeration). A
+container that keeps exiting and restarting is therefore reporting a
+persistent device or configuration problem — read the `FATAL` line and
+work back up the layers.
 
 ---
 

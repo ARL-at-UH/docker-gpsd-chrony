@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
+# Captured at entry: fail_exit uses this to satisfy Docker's 10-second
+# restart-policy rule (containers that exit sooner are never restarted)
+START_TIME=$(date +%s)
+
 ###############################################
 # Load config.env if present
 ###############################################
@@ -44,6 +48,8 @@ MONITOR_INTERVAL="${MONITOR_INTERVAL:-5}"
 # Monitoring configuration
 ENABLE_MONITORING="${ENABLE_MONITORING:-false}"
 RESTART_ON_FAILURE="${RESTART_ON_FAILURE:-false}"
+DEVICE_WAIT_TIMEOUT="${DEVICE_WAIT_TIMEOUT:-60}"
+MAX_RESTART_ATTEMPTS="${MAX_RESTART_ATTEMPTS:-5}"
 
 # PIDs of the supervised daemons (set by start_gpsd/start_chronyd).
 # Both daemons run in the foreground so these are the real daemon PIDs.
@@ -62,6 +68,39 @@ check_device() {
         return 1
     fi
     return 0
+}
+
+# Wait for a device node to appear (USB enumeration and udev can lag the
+# container start at boot)
+wait_for_device() {
+    local dev="$1"
+    local waited=0
+    while [[ ! -e "$dev" ]]; do
+        if (( waited >= DEVICE_WAIT_TIMEOUT )); then
+            log "ERROR: Device $dev did not appear within ${DEVICE_WAIT_TIMEOUT}s"
+            return 1
+        fi
+        if (( waited % 10 == 0 )); then
+            log "Waiting for device $dev (${waited}/${DEVICE_WAIT_TIMEOUT}s)..."
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    return 0
+}
+
+# Unrecoverable failure: exit nonzero so Docker's restart policy recreates
+# the container (each fresh start re-resolves the devices: mappings, which
+# heals a re-enumerated USB device). Docker only honors the restart policy
+# if the container was up for at least 10 seconds, so pad the uptime first.
+fail_exit() {
+    log "FATAL: $*"
+    local uptime=$(( $(date +%s) - START_TIME ))
+    if (( uptime < 11 )); then
+        log "Holding $((11 - uptime))s to satisfy Docker's 10-second restart-policy rule..."
+        sleep $((11 - uptime))
+    fi
+    exit 1
 }
 
 ###############################################
@@ -184,24 +223,42 @@ trap cleanup SIGTERM SIGINT SIGQUIT
 monitor_services() {
     log "Monitoring services..."
 
+    # Consecutive-failure counters: reset whenever a service is seen
+    # healthy; when one exceeds MAX_RESTART_ATTEMPTS the container exits
+    # so Docker's restart policy can recreate it with fresh device mappings
+    local gpsd_failures=0
+    local chronyd_failures=0
+
     while true; do
 
         if [[ -n "$GPSD_PID" ]] && ! kill -0 "$GPSD_PID" 2>/dev/null; then
             log "ERROR: gpsd died"
+            gpsd_failures=$((gpsd_failures + 1))
+            if (( gpsd_failures > MAX_RESTART_ATTEMPTS )); then
+                fail_exit "gpsd still down after ${MAX_RESTART_ATTEMPTS} restart attempts; exiting so Docker can recreate the container"
+            fi
             if [[ "$RESTART_ON_FAILURE" == "true" ]]; then
                 if ! start_gpsd; then
-                    log "WARNING: gpsd restart failed; retrying in ${MONITOR_INTERVAL}s"
+                    log "WARNING: gpsd restart failed (attempt ${gpsd_failures}/${MAX_RESTART_ATTEMPTS}); retrying in ${MONITOR_INTERVAL}s"
                 fi
             fi
+        else
+            gpsd_failures=0
         fi
 
         if [[ -n "$CHRONYD_PID" ]] && ! kill -0 "$CHRONYD_PID" 2>/dev/null; then
             log "ERROR: chronyd died"
+            chronyd_failures=$((chronyd_failures + 1))
+            if (( chronyd_failures > MAX_RESTART_ATTEMPTS )); then
+                fail_exit "chronyd still down after ${MAX_RESTART_ATTEMPTS} restart attempts; exiting so Docker can recreate the container"
+            fi
             if [[ "$RESTART_ON_FAILURE" == "true" ]]; then
                 if ! start_chronyd; then
-                    log "WARNING: chronyd restart failed; retrying in ${MONITOR_INTERVAL}s"
+                    log "WARNING: chronyd restart failed (attempt ${chronyd_failures}/${MAX_RESTART_ATTEMPTS}); retrying in ${MONITOR_INTERVAL}s"
                 fi
             fi
+        else
+            chronyd_failures=0
         fi
 
         # Background the sleep so trapped signals (docker stop) are
@@ -234,6 +291,8 @@ show_config() {
     log "  MONITOR_INTERVAL: ${MONITOR_INTERVAL}s"
     log "  ENABLE_MONITORING: $ENABLE_MONITORING"
     log "  RESTART_ON_FAILURE: $RESTART_ON_FAILURE"
+    log "  DEVICE_WAIT_TIMEOUT: ${DEVICE_WAIT_TIMEOUT}s"
+    log "  MAX_RESTART_ATTEMPTS: $MAX_RESTART_ATTEMPTS"
     log "======================="
 }
 
@@ -244,10 +303,11 @@ main() {
     log "=== GPS/Chrony Startup Script ==="
     show_config
 
-    start_chronyd
+    start_chronyd || fail_exit "chronyd failed to start"
     sleep "$CHRONYD_START_DELAY"
 
-    start_gpsd
+    wait_for_device "$GPS_DEVICE" || fail_exit "GPS device $GPS_DEVICE not available"
+    start_gpsd || fail_exit "gpsd failed to start"
     sleep "$GPSD_START_DELAY"
 
     log "All services started successfully"

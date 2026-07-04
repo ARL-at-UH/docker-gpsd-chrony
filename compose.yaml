@@ -1,8 +1,9 @@
-name: rpi_gpsd_chrony
+name: gpsd_chrony
 services:
-    rpi-gpsd:
+    gpsd-chrony:
         stdin_open: true
         tty: true
+        restart: unless-stopped
         env_file:
             - config.env
         devices:

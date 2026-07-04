@@ -313,6 +313,40 @@ Or in the background (recommended):
 sudo docker compose up --detach
 ```
 
+## Run as a service (start at boot)
+
+The compose file sets `restart: unless-stopped`, so the container is a
+boot-persistent service by default — bring it up once with
+`sudo docker compose up -d` and Docker restores it on every boot, until
+you deliberately `docker compose stop`/`down` it.
+
+The only host requirement is that the Docker daemon itself starts at boot:
+
+- **Raspberry Pi OS / Jetson Linux:** `sudo systemctl enable docker`
+  (usually already enabled by the standard install)
+- **Torizon OS:** Docker is the native application runtime and is enabled
+  by default — nothing to do
+
+No systemd wrapper unit is needed. One would only add value if the
+container had to be ordered against other host services; for the standard
+deployment the restart policy is simpler and works identically on all
+supported platforms.
+
+### How the pieces self-heal
+
+- **Boot:** daemon starts → container starts → the `devices:` mappings
+  (including the `/dev/gps0` udev symlink) are re-resolved fresh.
+- **Slow USB enumeration at boot:** the entrypoint waits up to
+  `DEVICE_WAIT_TIMEOUT` (default 60 s) for the GPS device instead of
+  exiting immediately. This also satisfies Docker's *10-second rule*: a
+  container that exits within 10 seconds of starting is never restarted
+  by any restart policy, so the entrypoint guarantees a minimum uptime
+  before any failure exit.
+- **USB replug / re-enumeration while running:** gpsd loses the device,
+  the in-container monitor exhausts `MAX_RESTART_ATTEMPTS` (default 5)
+  and exits the container; the restart policy starts it again with
+  freshly resolved device mappings — no manual intervention.
+
 ## Verification
 
 Follow the layered procedure in [VERIFICATION.md](./VERIFICATION.md). It
