@@ -27,7 +27,8 @@ sudo docker exec -it gpsd-chrony bash
 
 ## Layer 0 — Host prerequisites (run on the host, not the container)
 
-1. **Device nodes exist** and match `config.env` (`GPS_DEVICE`, `PPS_DEVICE`):
+1. **Device nodes exist** and match the *host side* (left) of the
+   `devices:` mappings in `compose.yaml`:
 
    ```bash
    ls -l /dev/ttyACM0 /dev/pps0        # adjust to your platform
@@ -36,6 +37,14 @@ sudo docker exec -it gpsd-chrony bash
    If `/dev/pps0` is missing: check that the `pps-gpio` overlay/module is
    loaded (`lsmod | grep pps`, `dmesg | grep pps`) and the device tree
    overlay is applied (see `device_tree_overlays/`).
+
+   If using the stable-naming udev rule from `udev_rules/`, verify the
+   symlink resolves to the correct serial device:
+
+   ```bash
+   ls -l /dev/gps0
+   # lrwxrwxrwx 1 root root 7 ... /dev/gps0 -> ttyACM0
+   ```
 
 2. **No competing time daemon on the host.** `systemd-timesyncd`, host
    `chronyd`, or `ntpd` will fight the container for the clock:
@@ -101,8 +110,31 @@ sudo docker exec -it gpsd-chrony bash
    Multiple `gpsd` entries mean the restart logic is respawning against a
    stale PID (see the monitoring notes at the end of this guide).
 
+4. **The container-side device nodes exist** (the fixed names on the right
+   of the `devices:` mappings in `compose.yaml`):
+
+   ```bash
+   sudo docker exec gpsd-chrony ls -l /dev/gps0 /dev/pps0
+   ```
+
+   Both must be real character devices (`crw-...`), not symlinks. If
+   `/dev/gps0` is missing but `/dev/ttyACM0` exists inside the container,
+   `privileged: true` has probably been re-added — privileged mode makes
+   Docker ignore `devices:` mappings (see `udev_rules/README.md`).
+
+5. **No capability errors from chronyd.** The container runs unprivileged
+   with `cap_add: SYS_TIME, SYS_NICE, IPC_LOCK`. Any of these lines in the
+   startup log means a capability is missing from `compose.yaml`:
+
+   | Log message contains | Missing capability | Needed by |
+   |---|---|---|
+   | `adjtimex`/`settime` ... `Operation not permitted` | `SYS_TIME` | setting the system clock |
+   | `sched_setscheduler` ... `Operation not permitted` | `SYS_NICE` | `sched_priority` in chrony.conf |
+   | `mlockall` ... `Operation not permitted` | `IPC_LOCK` | `lock_all` in chrony.conf |
+
 **Pass criteria:** container `Up`, one gpsd process, one chronyd process,
-no repeating ERROR lines in the log.
+`/dev/gps0` and `/dev/pps0` present as char devices in the container,
+no repeating ERROR lines and no `Operation not permitted` in the log.
 
 ---
 
@@ -346,6 +378,7 @@ LAN-level offsets.
 | Symptom | First check | Likely cause |
 |---|---|---|
 | Container restart loop | `docker logs` | Missing device node; chronyd config error |
+| GPS dead after unplug/replug, container still up | host `ls -l /dev/gps0` vs container | Container node pinned to the old device — `docker compose up -d --force-recreate` |
 | Log spams `ERROR: gpsd died` but gpsd is running | `ps` inside container | Monitor tracking a stale PID (gpsd daemonized; parent PID recorded) — see note below |
 | Multiple gpsd processes in `ps` | startup log restart lines | Same stale-PID bug: monitor respawning gpsd every interval |
 | `ppstest` silent, gpsd has 3D fix | wiring / dtoverlay | PPS pin not reaching the kernel |
