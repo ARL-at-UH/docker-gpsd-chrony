@@ -1,0 +1,47 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * GNSS PPS input on Jetson Xavier NX 40-pin header, physical pin 29.
+ *
+ * Wiring: receiver PPS out -> header pin 29 (signal)
+ *         receiver GND     -> header pin 30 (ground, directly adjacent)
+ * The header is 3.3V logic. Do NOT feed a 5V PPS signal directly.
+ *
+ * Pin 29 = CVM name GPIO01, Tegra pad PQ.05, line offset 105 on the
+ * 169-line tegra194-gpio MAIN controller (&gpio = gpio@2200000).
+ * The gpios cell is the CONTROLLER-RELATIVE offset, NOT the global
+ * /sys/class/gpio number quoted by JetPack-4-era guides (their
+ * "gpio 393/440/..." numbers are chip base 288 + offset).
+ *
+ * See xavier-nx_pps_instructions.md in this directory for the full
+ * install and verification procedure.
+ */
+
+/ {
+    overlay-name = "GNSS PPS on header pin 29 (GPIO01)";
+
+    /* Must EXACTLY match the first string of
+     *   cat /proc/device-tree/compatible
+     * on the running Jetson, or the bootloader silently skips the overlay.
+     *   p3509-0000+p3668-0001 = Xavier NX devkit, production (eMMC) module
+     *   p3509-0000+p3668-0000 = Xavier NX devkit, SD-card module
+     */
+    compatible = "nvidia,p3509-0000+p3668-0001";
+
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            pps {
+                compatible = "pps-gpio";
+                /* offset 105 = pad PQ.05 = header pin 29; final cell 0 =
+                 * GPIO_ACTIVE_HIGH. pps-gpio timestamps the rising edge,
+                 * which is what u-blox and most receivers align to the
+                 * top of second. If your receiver pulses active-low,
+                 * add:  assert-falling-edge;  */
+                gpios = <&gpio 105 0>;
+                status = "okay";
+            };
+        };
+    };
+};
