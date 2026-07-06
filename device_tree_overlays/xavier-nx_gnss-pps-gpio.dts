@@ -39,7 +39,7 @@
                  * which is what u-blox and most receivers align to the
                  * top of second. If your receiver pulses active-low,
                  * add:  assert-falling-edge;  */
-                gpios = <&gpio 105 0>;
+                gpios = <&tegra_main_gpio 105 0>;
                 status = "okay";
             };
         };
