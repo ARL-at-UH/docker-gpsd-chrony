@@ -1,0 +1,15 @@
+[Unit]
+Description=Bind pps-gpio after the Tegra GPIO controller is ready
+# L4T r35 quirk: the builtin pps-gpio driver probes at ~3s, but the Tegra
+# GPIO controller (gpio-tegra186) registers at ~6s. Instead of deferring,
+# the probe fails hard with -22, so /dev/pps0 never appears even with a
+# correct device tree. This unit retries the bind until the controller is up.
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for i in $(seq 1 30); do [ -c /dev/pps0 ] && exit 0; echo pps > /sys/bus/platform/drivers/pps-gpio/bind 2>/dev/null; sleep 1; done; echo "pps-gpio bind failed after 30s" >&2; exit 1'
+
+[Install]
+WantedBy=multi-user.target

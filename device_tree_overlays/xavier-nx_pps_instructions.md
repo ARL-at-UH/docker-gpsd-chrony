@@ -102,28 +102,78 @@ sudo cp xavier-nx_gnss-pps-gpio.dtbo /boot/
 
 (dtc warnings about unit names/addresses are harmless; errors are not.)
 
-## 4. Register the overlay AND blacklist ktimer (one edit, one reboot)
+## 4. Merge the overlay into the DTB, register it, and blacklist ktimer
+
+Merge statically with `fdtoverlay` rather than relying on the bootloader's
+`OVERLAYS` keyword: the merge fails loudly instead of silently, works on
+every JetPack 5 point release, and can be verified before rebooting.
 
 ```sh
-sudo nano /boot/extlinux/extlinux.conf
+# Base DTB = the file on the FDT line of /boot/extlinux/extlinux.conf, or
+# your module's default under /boot/dtb/ if there is no FDT line yet:
+sudo fdtoverlay -i /boot/dtb/kernel_tegra194-p3668-0000-p3509-0000.dtb \
+                -o /boot/dtb/kernel_pps-merged.dtb \
+                xavier-nx_gnss-pps-gpio.dtbo
+
+# Verify BEFORE rebooting — middle value must be the sparse pin number:
+fdtget /boot/dtb/kernel_pps-merged.dtb /pps gpios     # expect: 12 133 0
 ```
 
-In the active `LABEL primary` block:
+Then `sudo nano /boot/extlinux/extlinux.conf` and edit the `LABEL` block
+named by the `DEFAULT` line at the top:
 
-1. Add the overlay line (or append to an existing `OVERLAYS` line,
-   comma-separated):
+1. Point (or add) the `FDT` line at the merged blob:
 
    ```
-   OVERLAYS /boot/xavier-nx_gnss-pps-gpio.dtbo
+   FDT /boot/dtb/kernel_pps-merged.dtb
    ```
 
-2. Append to the end of the existing `APPEND` line (same line, space-separated):
+   The path must be exact. **If any file referenced by the boot entry is
+   missing, the bootloader silently abandons extlinux.conf and boots the
+   partition defaults — discarding your `APPEND` edits too** (symptom: your
+   additions vanish from `/proc/cmdline`).
+
+2. Append to the end of the existing `APPEND` line (same line,
+   space-separated):
 
    ```
    initcall_blacklist=pps_ktimer_init
    ```
 
 Save, then `sudo reboot`.
+
+> Re-run the `fdtoverlay` merge after any JetPack/kernel update — a new
+> stock DTB does not regenerate your merged blob.
+
+## 4b. L4T boot-order workaround (required on L4T r35)
+
+On L4T r35 the Tegra GPIO controller driver (`gpio-tegra186`) loads as a
+module several seconds into boot, while the builtin `pps-gpio` probes
+earlier. Instead of deferring and retrying, the probe fails permanently:
+
+```
+pps-gpio pps: failed to request PPS GPIO
+pps-gpio: probe of pps failed with error -22
+```
+
+So even with a perfect device tree, `/dev/pps0` never appears on its own.
+Confirm the diagnosis (after the reboot from step 4) by rebinding manually:
+
+```sh
+echo pps | sudo tee /sys/bus/platform/drivers/pps-gpio/bind
+ls /dev/pps*        # /dev/pps0 appears
+```
+
+Make it automatic with the oneshot unit `pps-gpio-rebind.service` from this
+directory (it retries the bind until the controller is up, and orders itself
+before Docker so the container never starts without its device):
+
+```sh
+sudo cp pps-gpio-rebind.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now pps-gpio-rebind.service
+systemctl status pps-gpio-rebind.service   # want: active (exited), status=0
+```
 
 ## 5. Verify on the host after reboot
 
@@ -205,15 +255,18 @@ sudo docker exec gpsd-chrony chronyc tracking
 
 ## Troubleshooting
 
-- **No `/dev/pps0` at all after reboot** — overlay skipped. Check
-  `sudo dmesg | grep -iE 'dtbo|overlay'`; usual causes are a `compatible`
-  mismatch (step 3) or a wrong path on the `OVERLAYS` line.
+- **No `/proc/device-tree/pps` node after reboot** — the merged DTB wasn't
+  loaded. Check `/proc/cmdline` for your `APPEND` additions: if they are
+  missing, the bootloader fell back to partition boot because a file path in
+  the boot entry is wrong (step 4). Also confirm the merged blob itself with
+  `fdtget /boot/dtb/kernel_pps-merged.dtb /pps gpios`.
 - **`/proc/device-tree/pps` exists but no `/dev/pps0`** — driver didn't bind:
-  `sudo dmesg | grep -iE 'pps|gpio'` for probe errors. An out-of-range or
-  already-claimed GPIO offset shows up here.
-  `probe of pps failed with error -22` almost always means the packed
-  userspace offset was used in the `gpios` cell instead of the sparse DT
-  encoding — see the table below and the note in step 2.
+  `sudo dmesg | grep -iE 'pps|gpio'` for probe errors.
+  `probe of pps failed with error -22` has two causes, distinguishable by
+  timing: if the failure logs *before* `gpiochip: registered GPIOs ... on
+  tegra194-gpio`, it is the L4T boot-order bug — apply step 4b. Otherwise
+  the `gpios` cell likely holds the packed userspace offset instead of the
+  sparse DT encoding — see the table below and the note in step 2.
 - **`/dev/pps0` exists, `ppstest` shows no asserts** — receiver has no fix,
   wiring, or wrong pin: redo step 2's polling test.
 - **Asserts but timestamps drift wildly in the container** — check step 6's

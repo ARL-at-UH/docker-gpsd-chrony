@@ -169,3 +169,33 @@ okay
 nido@nido-desktop:~$ fdtget /boot/dtb/kernel_pps-merged.dtb "$P" status 2>/dev/null || echo "(no status = enabled)"
 okay
 nido@nido-desktop:~$
+
+1. Install the persistent fix. Copy device_tree_overlays/pps-gpio-rebind.service from the repo to the Jetson (or paste its contents), then:
+
+sudo cp pps-gpio-rebind.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now pps-gpio-rebind.service
+
+The unit retries the bind for up to 30 seconds at each boot and orders itself Before=docker.service, so the container can never race ahead of its own device.
+
+2. The acceptance test: one clean reboot, zero manual commands.
+
+sudo reboot
+# after it comes back:
+systemctl status pps-gpio-rebind.service   # active (exited)
+ls /dev/pps*                               # /dev/pps0, hands-free
+sudo ppstest /dev/pps0                     # asserts ticking
+
+3. The acid test (30 seconds, worth it given how this saga started): with ppstest running, unplug or cover the antenna — asserts must stop when the fix drops and resume when it returns. That's the categorical proof this is sky-derived and not another self-clocked source.
+
+4. Bring up the container and watch the original symptom die:
+
+sudo docker compose up -d --force-recreate
+sudo docker logs -f gpsd-chrony        # no "is fake PPS" warning this time
+# after ~10 minutes:
+sudo docker exec gpsd-chrony chronyc sources
+sudo docker exec gpsd-chrony chronyc tracking
+
+Success looks like #* PPS with microsecond offsets in sources (GPS showing #x falseticker is normal — it only numbers the PPS seconds now), and tracking with a stable frequency and skew well under 1 ppm — versus the ±800 ms ping-pong in your original debug.md.
+
+For the record, the failure was four independent layers deep, which is why it resisted: (1) /dev/pps0 was the kernel's built-in pps-ktimer test device echoing the system clock — fixed with initcall_blacklist; (2) the overlay never applied because fdt_overlays= in APPEND isn't a real mechanism, and later a wrong FDT path made the bootloader silently discard the whole boot entry — fixed with the fdtoverlay static merge; (3) the GPIO number needed Tegra's sparse DT encoding (PQ.05 = 133), not the packed userspace offset (105); (4) L4T probes builtin pps-gpio before the GPIO controller module loads and fails instead of deferring — fixed by the rebind unit. The guide now documents all four with their symptoms, so the next board takes twenty minutes instead of this odyssey.
