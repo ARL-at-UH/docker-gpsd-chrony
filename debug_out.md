@@ -151,3 +151,21 @@ fdtget /boot/dtb/kernel_pps-merged.dtb "$P" phandle
 fdtget /boot/dtb/kernel_pps-merged.dtb "$P" '#gpio-cells'
 fdtget /boot/dtb/kernel_pps-merged.dtb "$P" compatible
 fdtget /boot/dtb/kernel_pps-merged.dtb "$P" status 2>/dev/null || echo "(no status = enabled)"
+
+
+nido@nido-desktop:~$ P=$(fdtget /boot/dtb/kernel_pps-merged.dtb /__symbols__ tegra_main_gpio)
+nido@nido-desktop:~$ echo "symbol resolves to: $P"
+symbol resolves to: /gpio@2200000
+nido@nido-desktop:~$ fdtget /boot/dtb/kernel_pps-merged.dtb /pps gpios
+12 133 0
+nido@nido-desktop:~$ fdtget /boot/dtb/kernel_pps-merged.dtb "$P" phandle
+12
+nido@nido-desktop:~$ fdtget /boot/dtb/kernel_pps-merged.dtb "$P" '#gpio-cells'
+2
+nido@nido-desktop:~$ fdtget /boot/dtb/kernel_pps-merged.dtb "$P" compatible
+nvidia,tegra194-gpio
+nido@nido-desktop:~$ fdtget /boot/dtb/kernel_pps-merged.dtb "$P" status
+okay
+nido@nido-desktop:~$ fdtget /boot/dtb/kernel_pps-merged.dtb "$P" status 2>/dev/null || echo "(no status = enabled)"
+okay
+nido@nido-desktop:~$
