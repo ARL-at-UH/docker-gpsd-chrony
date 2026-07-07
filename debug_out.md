@@ -95,3 +95,27 @@ nido@nido-desktop:~$ ls /sys/bus/platform/drivers/ | grep -i pps
 pps-gpio
 nido@nido-desktop:~$ xxd /proc/device-tree/pps/gpios
 00000000: 0000 000c 0000 0069 0000 0000            .......i....
+
+
+On the Jetson, the loop is now short since the whole boot pipeline is proven:
+
+# 1. Worth 30 seconds first: confirm the pulse is really on the pin (this test
+#    was never run, and the failed probe means the line is currently unclaimed).
+#    Receiver needs a fix. Expect mostly 0s with a few 1s:
+CHIP=$(gpiodetect | awk '$3=="[tegra194-gpio]"{print $1}')
+for i in $(seq 1 60); do gpioget "$CHIP" 105; sleep 0.05; done | sort | uniq -c
+
+# 2. Edit the overlay source: change the gpios line to
+#       gpios = <&tegra_main_gpio 133 0>;
+#    then recompile and re-merge (output straight to where the FDT line points):
+dtc -@ -I dts -O dtb -o xavier-nx_gnss-pps-gpio.dtbo xavier-nx_gnss-pps-gpio.dts
+sudo fdtoverlay -i /boot/dtb/kernel_tegra194-p3668-0000-p3509-0000.dtb \
+                -o /boot/dtb/kernel_pps-merged.dtb \
+                xavier-nx_gnss-pps-gpio.dtbo
+sudo reboot
+
+After reboot:
+
+sudo dmesg | grep -i pps     # want: "pps pps0: new PPS source" and NO "error -22"
+ls /dev/pps*                 # /dev/pps0
+sudo ppstest /dev/pps0       # one assert per second

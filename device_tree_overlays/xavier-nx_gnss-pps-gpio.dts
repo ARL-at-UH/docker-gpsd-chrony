@@ -34,12 +34,17 @@
         __overlay__ {
             pps {
                 compatible = "pps-gpio";
-                /* offset 105 = pad PQ.05 = header pin 29; final cell 0 =
-                 * GPIO_ACTIVE_HIGH. pps-gpio timestamps the rising edge,
-                 * which is what u-blox and most receivers align to the
+                /* Header pin 29 = pad PQ.05. The DT gpio cell uses Tegra's
+                 * SPARSE encoding: port_index * 8 + pin. Port Q = index 16,
+                 * so PQ.05 = 16*8 + 5 = 133.
+                 * (This is NOT the packed line offset that gpioget/gpioinfo
+                 * use — that is 105 for the same pin. Passing 105 here
+                 * decodes as PN.01 and the driver fails probe with -22.)
+                 * Final cell 0 = GPIO_ACTIVE_HIGH. pps-gpio timestamps the
+                 * rising edge, which u-blox and most receivers align to the
                  * top of second. If your receiver pulses active-low,
                  * add:  assert-falling-edge;  */
-                gpios = <&tegra_main_gpio 105 0>;
+                gpios = <&tegra_main_gpio 133 0>;
                 status = "okay";
             };
         };

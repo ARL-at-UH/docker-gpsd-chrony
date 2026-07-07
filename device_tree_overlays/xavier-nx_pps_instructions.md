@@ -55,7 +55,13 @@ unwanted `pps-ktimer`). If it is missing entirely, stop — the kernel needs
 ## 2. Prove the pulse reaches the pin (before any device-tree work)
 
 This validates wiring, pinmux, and the line offset in one shot. Pin 29 is
-line offset **105** on the 169-line main GPIO controller:
+line offset **105** on the 169-line main GPIO controller.
+
+> **Two numbering schemes — do not mix them.** Userspace tools
+> (`gpioget`/`gpioinfo`) use the *packed* chip offset (105 for pin 29). The
+> device-tree `gpios` cell uses Tegra's *sparse* encoding
+> `port_index * 8 + pin` (PQ.05 → 16×8+5 = **133**). Using the packed number
+> in the overlay makes pps-gpio probe fail with error **-22** in dmesg.
 
 ```sh
 CHIP=$(gpiodetect | awk '$3=="[tegra194-gpio]"{print $1}')   # main chip, 169 lines
@@ -205,6 +211,9 @@ sudo docker exec gpsd-chrony chronyc tracking
 - **`/proc/device-tree/pps` exists but no `/dev/pps0`** — driver didn't bind:
   `sudo dmesg | grep -iE 'pps|gpio'` for probe errors. An out-of-range or
   already-claimed GPIO offset shows up here.
+  `probe of pps failed with error -22` almost always means the packed
+  userspace offset was used in the `gpios` cell instead of the sparse DT
+  encoding — see the table below and the note in step 2.
 - **`/dev/pps0` exists, `ppstest` shows no asserts** — receiver has no fix,
   wiring, or wrong pin: redo step 2's polling test.
 - **Asserts but timestamps drift wildly in the container** — check step 6's
@@ -212,9 +221,13 @@ sudo docker exec gpsd-chrony chronyc tracking
 - **Alternate pins** (all on the main `tegra194-gpio` chip; grounds at
   6, 9, 14, 20, 25, 30, 34, 39):
 
-  | Header pin | Offset | Pad | Name |
-  |---|---|---|---|
-  | 29 | 105 | PQ.05 | GPIO01 (this guide) |
-  | 31 | 106 | PQ.06 | GPIO11 (also next to GND pin 30) |
-  | 7  | 118 | PS.04 | GPIO09 (next to GND pin 9) |
-  | 33 | 84  | PN.01 | GPIO13 (next to GND pin 34) |
+  | Header pin | gpioget offset (packed) | DT `gpios` cell (sparse) | Pad | Name |
+  |---|---|---|---|---|
+  | 29 | 105 | 133 | PQ.05 | GPIO01 (this guide) |
+  | 31 | 106 | 134 | PQ.06 | GPIO11 (also next to GND pin 30) |
+  | 7  | 118 | 148 | PS.04 | GPIO09 (next to GND pin 9) |
+  | 33 | 84  | 105 | PN.01 | GPIO13 (next to GND pin 34) |
+
+  Sparse value = `port_index × 8 + pin` from the pad name (ports A=0 … Q=16,
+  R=17, S=18 …). Note the trap: sparse 105 is PN.01, a *different pin* than
+  packed 105 (PQ.05).
