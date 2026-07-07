@@ -119,3 +119,25 @@ After reboot:
 sudo dmesg | grep -i pps     # want: "pps pps0: new PPS source" and NO "error -22"
 ls /dev/pps*                 # /dev/pps0
 sudo ppstest /dev/pps0       # one assert per second
+
+
+nido@nido-desktop:~$ sudo dmesg | grep -iE 'pps|gpio'
+[    0.000000] Kernel command line: root=/dev/mmcblk0p1 rw rootwait rootfstype=ext4 console=ttyTCU0,115200n8 console=tty0 fbcon=map:0 net.ifnames=0 video=efifb:off nospectre_bhb initcall_blacklist=pps_ktimer_init
+[    0.000000] blacklisting initcall pps_ktimer_init
+[    0.408966] pps_core: LinuxPPS API ver. 1 registered
+[    0.408989] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    2.959514] initcall pps_ktimer_init blacklisted
+[    2.959532] pps_ldisc: PPS line discipline registered
+[    2.959954] pps-gpio pps: failed to request PPS GPIO
+[    2.960757] pps-gpio: probe of pps failed with error -22
+[    3.123572] gpio-510 (gpio_default): hogged as output/high
+[    3.124966] gpio-511 (gpio_default): hogged as output/high
+[    3.127889] gpiochip0: registered GPIOs 504 to 511 on max77620-gpio
+[    6.057287] gpio-374 (wifi-enable): hogged as output/high
+[    6.057591] gpio-431 (camera-control-output-low): hogged as output/low
+[    6.057862] gpio-432 (camera-control-output-low): hogged as output/low
+[    6.059827] gpiochip1: registered GPIOs 335 to 503 on tegra194-gpio
+[    6.062188] gpiochip2: registered GPIOs 305 to 334 on tegra194-gpio-aon
+[    6.638281] i2c-mux-gpio cam_i2cmux: 2 port mux on 3180000.i2c adapter
+[    6.654656] sdhci-tegra 3400000.sdhci: Got CD GPIO
+[    7.083500] input: gpio-keys as /devices/platform/gpio-keys/input/input0
