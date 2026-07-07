@@ -141,3 +141,13 @@ nido@nido-desktop:~$ sudo dmesg | grep -iE 'pps|gpio'
 [    6.638281] i2c-mux-gpio cam_i2cmux: 2 port mux on 3180000.i2c adapter
 [    6.654656] sdhci-tegra 3400000.sdhci: Got CD GPIO
 [    7.083500] input: gpio-keys as /devices/platform/gpio-keys/input/input0
+
+
+
+P=$(fdtget /boot/dtb/kernel_pps-merged.dtb /__symbols__ tegra_main_gpio)
+echo "symbol resolves to: $P"
+fdtget /boot/dtb/kernel_pps-merged.dtb /pps gpios
+fdtget /boot/dtb/kernel_pps-merged.dtb "$P" phandle
+fdtget /boot/dtb/kernel_pps-merged.dtb "$P" '#gpio-cells'
+fdtget /boot/dtb/kernel_pps-merged.dtb "$P" compatible
+fdtget /boot/dtb/kernel_pps-merged.dtb "$P" status 2>/dev/null || echo "(no status = enabled)"
