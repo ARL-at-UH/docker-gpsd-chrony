@@ -23,7 +23,8 @@ Tested platforms:
 | Raspberry Pi 4 (Debian 12) | `/dev/ttyAMA0` | `/dev/pps0` | UART + `pps-gpio` overlay |
 | Toradex Verdin iMX8M Plus (Mallow carrier, Torizon OS) | `/dev/ttyACM0` | `/dev/pps0` | USB GNSS + GPIO PPS overlay (see [device_tree_overlays](./device_tree_overlays/)) |
 | Toradex Apalis (Ixora carrier) | `/dev/apalis-uart2` | `/dev/pps1` | UART + GPIO PPS |
-| NVIDIA Jetson Xavier NX | `/dev/ttyACM0` | `/dev/pps0` | prebuilt image tag `xavier-nx` |
+| NVIDIA Jetson Xavier NX | `/dev/ttyACM0` | `/dev/pps0` | prebuilt image tag `xavier-nx`; PPS setup: [device_tree_overlays](./device_tree_overlays/) |
+| NVIDIA Jetson AGX Orin devkit (JetPack 6) | `/dev/ttyACM0` | `/dev/pps0` | USB GNSS + GPIO PPS overlay; setup: [device_tree_overlays](./device_tree_overlays/) |
 
 Host device names go on the **left side** of the `devices:` mappings in
 [compose.yaml](./compose.yaml); inside the container they always appear as
@@ -63,6 +64,9 @@ Docker Hub: [arluhdev/docker-gpsd-chrony](https://hub.docker.com/repository/dock
 - [Jetson Linux Developer Guide — kernel and device tree customization](https://docs.nvidia.com/jetson/archives/r36.3/DeveloperGuide/SD/Kernel.html)
 - Expansion header configuration tool: `sudo /opt/nvidia/jetson-io/jetson-io.py`
 - [Jetson Xavier NX GPIO header pinout (JetsonHacks)](https://jetsonhacks.com/nvidia-jetson-xavier-nx-gpio-header-pinout/)
+- This repo's Jetson PPS overlays + step-by-step guides:
+  [Xavier NX](./device_tree_overlays/xavier-nx_pps_instructions.md),
+  [AGX Orin](./device_tree_overlays/agx-orin_pps_instructions.md)
 
 ## Prerequisites
 
