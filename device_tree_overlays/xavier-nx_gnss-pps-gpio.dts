@@ -27,7 +27,7 @@
      *   p3509-0000+p3668-0001 = Xavier NX devkit, production (eMMC) module
      *   p3509-0000+p3668-0000 = Xavier NX devkit, SD-card module
      */
-    compatible = "nvidia,p3509-0000+p3668-0001";
+    compatible = "nvidia,p3509-0000+p3668-0000";
 
     fragment@0 {
         target-path = "/";

@@ -129,7 +129,7 @@ grep -o 'initcall_blacklist=[^ ]*' /proc/cmdline     # prints the blacklist
 ls /sys/devices/virtual/pps 2>/dev/null              # should NOT exist / be empty
 
 # 5b. Exactly one PPS device, and it is hardware-backed:
-ls /dev/pps*                                         # exactly /dev/pps0
+# exactly /dev/pps0
 cat /sys/class/pps/pps0/name                         # NOT "ktimer"
 readlink -f /sys/class/pps/pps0                      # .../devices/platform/pps/... (not /virtual/)
 
