@@ -41,3 +41,23 @@ nido@nido-desktop:~$ sudo ppstest /dev/pps0
 trying PPS source "/dev/pps0"
 unable to open device "/dev/pps0" (No such file or directory)
 nido@nido-desktop:~$
+
+response: 
+
+# Is the driver even present, and is it builtin or a module?
+grep -i pps /lib/modules/$(uname -r)/modules.builtin
+modinfo pps_gpio 2>/dev/null | head -3
+
+# If it's a module, load it by hand — this alone may finish the job:
+sudo modprobe pps_gpio
+ls /dev/pps* ; dmesg | tail -5
+
+# What did the kernel say about the node/driver?
+sudo dmesg | grep -iE 'pps|2200000'
+
+# Did the platform device get created, and does a pps-gpio driver exist to claim it?
+ls /sys/bus/platform/devices/ | grep -i pps
+ls /sys/bus/platform/drivers/ | grep -i pps
+
+# Sanity: the overlay's gpios property resolved to real values (phandle + 105 + 0)
+xxd /proc/device-tree/pps/gpios
