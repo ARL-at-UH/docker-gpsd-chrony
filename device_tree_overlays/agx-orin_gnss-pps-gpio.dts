@@ -1,0 +1,59 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * GNSS PPS input on Jetson AGX Orin devkit (p3737) 40-pin header,
+ * physical pin 22.
+ *
+ * Wiring: receiver PPS out -> header pin 22 (signal, GPIO17 / pad PP.04)
+ *         receiver GND     -> header pin 20 (ground, directly adjacent)
+ * The header is 3.3V logic. Do NOT feed a 5V PPS signal directly.
+ *
+ * Pin 22 = CVM name GPIO17, Tegra pad PP.04. The DT gpio cell uses
+ * Tegra's SPARSE encoding: port_index * 8 + pin. On Tegra234 MAIN,
+ * port P = index 14, so PP.04 = 14*8 + 4 = 116.
+ * (This is NOT the packed line offset that gpioget/gpioinfo use — that
+ * is 96 for the same pin. Mixing the two makes pps-gpio probe fail
+ * with error -22.)
+ *
+ * NOTE: Tegra234 MAIN port indices differ from Tegra194 (there is no
+ * port O, so Q=15 here vs 16 on Xavier). Do not reuse Xavier numbers.
+ * Avoid header pins 16/29/31/32/33/37 — on the AGX Orin those sit on
+ * the AON controller (&gpio_aon), which needs a different phandle and
+ * its own port numbering.
+ *
+ * &gpio = Tegra234 MAIN gpio controller (gpio@2200000). Verify the
+ * symbol exists in your base DTB before merging:
+ *   fdtget <base.dtb> /__symbols__ gpio
+ *
+ * See agx-orin_pps_instructions.md in this directory for the full
+ * install and verification procedure.
+ */
+
+/ {
+    overlay-name = "GNSS PPS on header pin 22 (GPIO17)";
+
+    /* Must EXACTLY match the first string of
+     *   cat /proc/device-tree/compatible
+     * on the running Jetson, or the overlay is silently skipped.
+     *   p3737-0000+p3701-0000 = AGX Orin devkit, 32GB module
+     *   p3737-0000+p3701-0004 / -0005 = 64GB variants
+     *   p3737-0000+p3701-0008 = AGX Orin Industrial
+     */
+    compatible = "nvidia,p3737-0000+p3701-0000";
+
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            pps {
+                compatible = "pps-gpio";
+                /* PP.04 sparse = 116; final cell 0 = GPIO_ACTIVE_HIGH.
+                 * pps-gpio timestamps the rising edge, which u-blox and
+                 * most receivers align to the top of second. If your
+                 * receiver pulses active-low, add: assert-falling-edge; */
+                gpios = <&gpio 116 0>;
+                status = "okay";
+            };
+        };
+    };
+};
