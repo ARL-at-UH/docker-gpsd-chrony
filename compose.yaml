@@ -11,7 +11,7 @@ services:
             # /dev/gps0 udev symlink once udev_rules/ is installed, and use the
             # platform's PPS name (e.g. /dev/pps1 on Apalis).
             # container side (right) is fixed; config.env and chrony.conf never change.
-            - /dev/ttyACM0:/dev/gps0
+            - /dev/gps0:/dev/gps0
             - /dev/pps0:/dev/pps0
         ports:
             # NTP to external hosts — must be /udp (a bare 123:123 would
