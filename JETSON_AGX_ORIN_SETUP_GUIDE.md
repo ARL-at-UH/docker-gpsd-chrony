@@ -75,7 +75,10 @@ skip steps:
 It walks through: host prerequisites, proving the raw pulse reaches the pin
 *before* touching the device tree, building and merging the overlay,
 blacklisting the fake `pps-ktimer` source, and verifying `/dev/pps0` is
-real and pulsing after reboot. Do not proceed past this step until
+real and pulsing after reboot. **No internet on the Jetson?**
+[deps/](./deps/) has the three host packages it needs (`gpiod`,
+`pps-tools`, `device-tree-compiler`) pre-downloaded for offline install.
+Do not proceed past this step until
 `sudo ppstest /dev/pps0` shows one assert per second.
 
 ## 5. (Optional) Install the udev rule for a stable GPS device name

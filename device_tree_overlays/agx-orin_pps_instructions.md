@@ -37,6 +37,10 @@ grep -i pps /lib/modules/$(uname -r)/modules.builtin   # what's builtin?
 modinfo pps_gpio 2>/dev/null | head -3                 # module or builtin?
 ```
 
+No internet on the Jetson? [../deps/](../deps/) has these three packages
+(and their dependencies) pre-downloaded for arm64/JetPack 6.x, with an
+offline install README.
+
 `pps-gpio` must exist as builtin or module. While there, note how
 **pps-ktimer** ships, because neutralizing it differs by build type:
 
