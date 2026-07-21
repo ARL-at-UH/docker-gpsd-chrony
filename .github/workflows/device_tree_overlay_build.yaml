@@ -3,9 +3,10 @@ name: Build Device Tree Overlay
 
 on:
   push:
-    branches: 
+    branches:
       - main
       - JETSON_XAVIER_NX
+      - JETSON_AGX_ORIN
     paths: ['**.dts']
   pull_request:
     paths: ['**.dts']
@@ -23,11 +24,13 @@ jobs:
       - name: Verify dtc version (>= 1.6.0 recommended)
         run: dtc --version
 
-      - name: Compile overlay
+      - name: Compile overlays
         working-directory: device_tree_overlays
         run: |
           mkdir -p build
-          dtc -@ -I dts -O dtb -o build/xavier-nx_gnss-pps-gpio.dtbo xavier-nx_gnss-pps-gpio.dts
+          for dts in *.dts; do
+            dtc -@ -I dts -O dtb -o "build/${dts%.dts}.dtbo" "$dts"
+          done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5

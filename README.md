@@ -24,7 +24,7 @@ Tested platforms:
 | Toradex Verdin iMX8M Plus (Mallow carrier, Torizon OS) | `/dev/ttyACM0` | `/dev/pps0` | USB GNSS + GPIO PPS overlay (see [device_tree_overlays](./device_tree_overlays/)) |
 | Toradex Apalis (Ixora carrier) | `/dev/apalis-uart2` | `/dev/pps1` | UART + GPIO PPS |
 | NVIDIA Jetson Xavier NX | `/dev/ttyACM0` | `/dev/pps0` | prebuilt image tag `xavier-nx`; PPS setup: [device_tree_overlays](./device_tree_overlays/) |
-| NVIDIA Jetson AGX Orin devkit (JetPack 6) | `/dev/ttyACM0` | `/dev/pps0` | USB GNSS + GPIO PPS overlay; setup: [device_tree_overlays](./device_tree_overlays/) |
+| NVIDIA Jetson AGX Orin devkit (JetPack 6) | `/dev/ttyACM0` | `/dev/pps0` | USB GNSS + GPIO PPS overlay; fresh-install walkthrough: [JETSON_AGX_ORIN_SETUP_GUIDE.md](./JETSON_AGX_ORIN_SETUP_GUIDE.md) |
 
 Host device names go on the **left side** of the `devices:` mappings in
 [compose.yaml](./compose.yaml); inside the container they always appear as
@@ -191,31 +191,40 @@ for production (see the instructions above).
 
 ### NVIDIA Jetson
 
-Tested on Jetson Xavier NX (a prebuilt image is published with the
-`xavier-nx` tag).
+Both boards below use the same pattern: a USB GNSS receiver needs no serial
+configuration, and PPS comes in on a 40-pin header GPIO bound to the
+`pps-gpio` driver via a device tree overlay. This repo ships a ready-made
+overlay and a full step-by-step install + verification guide per board —
+follow the linked guide rather than the summary here.
 
-1. **Serial**: a USB GNSS receiver enumerates as `/dev/ttyACM0` with no
-   extra configuration. For a UART receiver, configure the 40-pin header
-   UART with the expansion header tool:
+- **Jetson Xavier NX** (prebuilt image published with the `xavier-nx` tag):
+  overlay [xavier-nx_gnss-pps-gpio.dts](./device_tree_overlays/xavier-nx_gnss-pps-gpio.dts)
+  and guide
+  [xavier-nx_pps_instructions.md](./device_tree_overlays/xavier-nx_pps_instructions.md).
+- **Jetson AGX Orin devkit** (JetPack 6.x / L4T r36): overlay
+  [agx-orin_gnss-pps-gpio.dts](./device_tree_overlays/agx-orin_gnss-pps-gpio.dts)
+  and guide
+  [agx-orin_pps_instructions.md](./device_tree_overlays/agx-orin_pps_instructions.md).
+  For the full flow from a fresh JetPack 6.x flash to a verified running
+  container, see
+  [JETSON_AGX_ORIN_SETUP_GUIDE.md](./JETSON_AGX_ORIN_SETUP_GUIDE.md).
 
-    ```bash
-    sudo /opt/nvidia/jetson-io/jetson-io.py
-    ```
+Each guide covers: wiring the PPS line to a specific header pin, disabling
+the fake `pps-ktimer` source (see the Xavier guide's "Background: why
+ktimer must go" section — the failure mode and fix are identical on both
+boards, just with different device tree port numbering), building and
+merging the overlay, and verifying the pulse end-to-end. For a UART
+receiver instead of USB, configure the header UART first with the
+expansion header tool:
 
-2. **PPS**: bind a header GPIO to the `pps-gpio` driver with a device tree
-   overlay, the same pattern as the Verdin overlay in
-   [device_tree_overlays](./device_tree_overlays/) but with
-   `compatible` and the GPIO phandle set for your Jetson module/carrier.
-   See the [Jetson Linux Developer Guide](https://docs.nvidia.com/jetson/)
-   for compiling and registering overlays, and the
-   [JetsonHacks pinout](https://jetsonhacks.com/nvidia-jetson-xavier-nx-gpio-header-pinout/)
-   for header GPIO numbering.
-3. Verify after reboot: `ls /dev/pps*` and `dmesg | grep -i pps` should
-   show the `pps-gpio` device.
+```bash
+sudo /opt/nvidia/jetson-io/jetson-io.py
+```
 
-Typical compose mapping: `- /dev/ttyACM0:/dev/gps0` and
+Typical compose mapping (either board): `- /dev/ttyACM0:/dev/gps0` and
 `- /dev/pps0:/dev/pps0` (or `- /dev/gps0:/dev/gps0` with the udev rule
-from [udev_rules](./udev_rules/) installed).
+from [udev_rules](./udev_rules/) installed — the rule matches on USB
+vendor/product ID and needs no board-specific changes).
 
 ## Container configuration
 
