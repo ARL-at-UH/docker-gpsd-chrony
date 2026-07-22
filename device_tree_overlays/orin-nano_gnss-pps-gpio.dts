@@ -47,13 +47,19 @@
     /* Must EXACTLY match the first string of
      *   cat /proc/device-tree/compatible
      * on the running Jetson, or the overlay is silently skipped.
-     *   p3768-0000+p3767-0005 = Orin Nano devkit, 8GB module, SD-card
+     *   p3768-0000+p3767-0005-super = Orin Nano Super devkit, 8GB module,
+     *     SD-card, Super Mode firmware active (this file's target)
+     *   p3768-0000+p3767-0005 = same devkit, pre-Super-Mode firmware
      *   p3768-0000+p3767-0003 = Orin Nano 8GB, eMMC (commercial module)
      *   p3768-0000+p3767-0004 = Orin Nano 4GB
      * (Orin NX modules -0000/-0001 use the same p3768 carrier and the
      * same pad for pin 22, but are out of scope for this file's name.)
+     *
+     * Super Mode only changes the power/clock profile, not the module's
+     * pinout, so the "-super" suffix affects this compatible string only
+     * -- the GPIO pad/sparse/packed numbers below are unchanged.
      */
-    compatible = "nvidia,p3768-0000+p3767-0005";
+    compatible = "nvidia,p3768-0000+p3767-0005-super";
 
     fragment@0 {
         target-path = "/";

@@ -37,6 +37,13 @@ divider. The receiver must have a fix for a (meaningful) pulse to exist.
 > `spidev`, a Jetson-IO config change, or another overlay). Step 2 below
 > proves that before you touch the device tree.
 
+> **Super Mode devkits:** if `cat /proc/device-tree/compatible` shows a
+> `-super` suffix (e.g. `nvidia,p3768-0000+p3767-0005-super`), that's the
+> Jetson Orin Nano Super power/clock firmware — it's the same p3767-0005
+> module and the same pinout, so pin 22 is still PY.01 and none of the
+> GPIO numbers below change. Only the `compatible` string in the overlay
+> (step 3) needs the `-super` suffix to match.
+
 ## 1. Host prerequisites
 
 ```sh
@@ -95,7 +102,8 @@ cat /proc/device-tree/compatible | tr '\0' '\n' | head -1
 ```
 
 Make the overlay's `compatible` match exactly (devkit module variants:
-p3767-0005 devkit SD-card 8GB, -0003 commercial eMMC 8GB, -0004 4GB), then:
+p3767-0005-super devkit SD-card 8GB with Super Mode firmware, p3767-0005
+same without Super Mode, -0003 commercial eMMC 8GB, -0004 4GB), then:
 
 ```sh
 dtc -@ -I dts -O dtb -o orin-nano_gnss-pps-gpio.dtbo orin-nano_gnss-pps-gpio.dts
@@ -104,8 +112,9 @@ dtc -@ -I dts -O dtb -o orin-nano_gnss-pps-gpio.dtbo orin-nano_gnss-pps-gpio.dts
 ## 4. Merge into the DTB, register, and (if builtin) blacklist ktimer
 
 ```sh
-ls /boot/dtb/        # r36 names look like kernel_tegra234-p3768-0000+p3767-0005-nv.dtb
-BASE=/boot/dtb/kernel_tegra234-p3768-0000+p3767-0005-nv.dtb   # adjust to yours
+ls /boot/dtb/        # r36 names look like kernel_tegra234-p3768-0000+p3767-0005-super-nv.dtb
+                      # (unconfirmed exact filename for the -super variant -- check `ls` output)
+BASE=/boot/dtb/kernel_tegra234-p3768-0000+p3767-0005-super-nv.dtb   # adjust to yours
 
 # The gpio phandle must resolve; this prints a path like /bus@0/gpio@2200000:
 fdtget "$BASE" /__symbols__ gpio
