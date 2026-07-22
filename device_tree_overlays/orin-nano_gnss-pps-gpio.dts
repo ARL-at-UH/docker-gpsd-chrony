@@ -1,0 +1,72 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * GNSS PPS input on Jetson Orin Nano devkit (p3768 carrier) 40-pin header,
+ * physical pin 22 -- the same physical pin used by agx-orin_gnss-pps-gpio.dts.
+ *
+ * Wiring: receiver PPS out -> header pin 22 (signal)
+ *         receiver GND     -> header pin 20 (ground, directly adjacent)
+ * The header is 3.3V logic. Do NOT feed a 5V PPS signal directly.
+ *
+ * IMPORTANT: unlike the AGX Orin devkit, pin 22 on the Orin Nano/NX devkit
+ * is NOT "GPIO17" -- that CVM name belongs to the AGX Orin module's pinmux
+ * only. On p3767 modules, header pin 22 is SoC pad PY.01, CVM name
+ * SPI1_MISO. There is no pin named GPIO17 anywhere on this header (checked
+ * against NVIDIA's jetson-gpio channel table for JETSON_ORIN_NX/NANO).
+ * Electrically this is fine for a PPS input -- like most 40-pin header
+ * pins on Jetson, it defaults to plain GPIO/tristate until something
+ * (Jetson-IO, a device tree overlay, a loaded spidev) claims the SPI1
+ * function. Confirm this with the gpioget polling test in
+ * orin-nano_pps_instructions.md step 2 BEFORE building this overlay --
+ * if the pin reads all 0s/1s with no pulse, SPI1 may already own it and
+ * you'll need to add a pinctrl fragment overriding the mux to GPIO mode.
+ *
+ * Pin 22 = pad PY.01. The DT gpio cell uses Tegra's SPARSE encoding:
+ * port_index * 8 + pin. On Tegra234 MAIN, port Y = index 18 (same MAIN
+ * port table as the AGX Orin overlay: A=0 ... N=13, P=14, Q=15, R=16,
+ * X=17, Y=18, Z=19 -- this indexing is a property of the Tegra234 die
+ * itself, not the carrier board, so it's shared with the AGX overlay).
+ * PY.01 = 18*8 + 1 = 145.
+ * (This is NOT the packed line offset that gpioget/gpioinfo use -- that
+ * is 123 for the same pin. Mixing the two makes pps-gpio probe fail
+ * with error -22.)
+ *
+ * &gpio = Tegra234 MAIN gpio controller (gpio@2200000), same symbol as
+ * the AGX Orin overlay since both share the tegra234.dtsi base. Verify
+ * the symbol exists in your base DTB before merging:
+ *   fdtget <base.dtb> /__symbols__ gpio
+ *
+ * See orin-nano_pps_instructions.md in this directory for the full
+ * install and verification procedure.
+ */
+
+/ {
+    overlay-name = "GNSS PPS on header pin 22 (SPI1_MISO / PY.01)";
+
+    /* Must EXACTLY match the first string of
+     *   cat /proc/device-tree/compatible
+     * on the running Jetson, or the overlay is silently skipped.
+     *   p3768-0000+p3767-0005 = Orin Nano devkit, 8GB module, SD-card
+     *   p3768-0000+p3767-0003 = Orin Nano 8GB, eMMC (commercial module)
+     *   p3768-0000+p3767-0004 = Orin Nano 4GB
+     * (Orin NX modules -0000/-0001 use the same p3768 carrier and the
+     * same pad for pin 22, but are out of scope for this file's name.)
+     */
+    compatible = "nvidia,p3768-0000+p3767-0005";
+
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            pps {
+                compatible = "pps-gpio";
+                /* PY.01 sparse = 145; final cell 0 = GPIO_ACTIVE_HIGH.
+                 * pps-gpio timestamps the rising edge, which u-blox and
+                 * most receivers align to the top of second. If your
+                 * receiver pulses active-low, add: assert-falling-edge; */
+                gpios = <&gpio 145 0>;
+                status = "okay";
+            };
+        };
+    };
+};
